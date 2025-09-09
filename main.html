@@ -1,0 +1,240 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>روبوت تحليل العملات</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        body {
+            font-family: 'Inter', sans-serif;
+            background: linear-gradient(to right, #667eea, #764ba2);
+            direction: rtl;
+        }
+        .chat-container {
+            max-width: 600px;
+            height: 80vh;
+            display: flex;
+            flex-direction: column;
+            border-radius: 1rem;
+            box-shadow: 0 4px 20px rgba(0, 0, 0, 0.2);
+            overflow: hidden;
+            background-color: white;
+            padding: 1rem;
+        }
+        .chat-messages {
+            flex-grow: 1;
+            overflow-y: auto;
+            padding: 1rem;
+            border-bottom: 1px solid #e5e7eb;
+            direction: ltr;
+        }
+        .message {
+            margin-bottom: 1rem;
+            display: flex;
+        }
+        .message.user {
+            justify-content: flex-start;
+        }
+        .message.bot {
+            justify-content: flex-end;
+        }
+        .message-bubble {
+            max-width: 80%;
+            padding: 0.75rem 1.25rem;
+            border-radius: 1.5rem;
+            line-height: 1.5;
+            word-wrap: break-word;
+        }
+        .message.user .message-bubble {
+            background-color: #e2e8f0;
+            color: #1a202c;
+            border-top-left-radius: 0.5rem;
+        }
+        .message.bot .message-bubble {
+            background-color: #667eea;
+            color: white;
+            border-top-right-radius: 0.5rem;
+        }
+        .input-area {
+            display: flex;
+            padding-top: 1rem;
+        }
+        .input-area textarea {
+            flex-grow: 1;
+            padding: 0.75rem;
+            border-radius: 0.75rem;
+            border: 1px solid #cbd5e0;
+            resize: none;
+            direction: rtl;
+        }
+        .input-area button {
+            padding: 0.75rem 1.5rem;
+            margin-right: 0.5rem;
+            border-radius: 0.75rem;
+            background-color: #764ba2;
+            color: white;
+            transition: background-color 0.3s;
+        }
+        .input-area button:hover {
+            background-color: #6a4094;
+        }
+        #api-key-input {
+            width: 100%;
+            margin-bottom: 1rem;
+        }
+        .loading-indicator {
+            display: none;
+            justify-content: center;
+            align-items: center;
+            margin-top: 1rem;
+        }
+        .spinner {
+            border: 4px solid rgba(0, 0, 0, 0.1);
+            border-left-color: #667eea;
+            border-radius: 50%;
+            width: 30px;
+            height: 30px;
+            animation: spin 1s linear infinite;
+        }
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
+    </style>
+</head>
+<body class="flex justify-center items-center min-h-screen">
+
+    <div class="chat-container">
+        <div class="chat-messages" id="chat-messages">
+            <div class="message bot">
+                <div class="message-bubble">أهلاً بك! أنا روبوت دردشة مالي. من فضلك أدخل مفتاح الـ API الخاص بك لبدء التحليل.</div>
+            </div>
+        </div>
+        <div class="input-area">
+            <input type="password" id="api-key-input" placeholder="أدخل مفتاح الـ API الخاص بك هنا...">
+        </div>
+        <div class="input-area flex-col md:flex-row">
+            <textarea id="user-input" rows="1" placeholder="اكتب اسم العملة..." class="flex-grow-1"></textarea>
+            <button id="send-btn" class="mt-2 md:mt-0">إرسال</button>
+        </div>
+        <div class="loading-indicator" id="loading-indicator">
+            <div class="spinner"></div>
+        </div>
+    </div>
+
+    <script>
+        document.addEventListener('DOMContentLoaded', () => {
+            const apiKeyInput = document.getElementById('api-key-input');
+            const chatMessages = document.getElementById('chat-messages');
+            const userInput = document.getElementById('user-input');
+            const sendBtn = document.getElementById('send-btn');
+            const loadingIndicator = document.getElementById('loading-indicator');
+
+            let apiKey = '';
+            let isApiKeyEntered = false;
+
+            // Function to add a message to the chat display
+            function addMessage(sender, message) {
+                const messageDiv = document.createElement('div');
+                messageDiv.className = `message ${sender}`;
+                messageDiv.innerHTML = `<div class="message-bubble">${message}</div>`;
+                chatMessages.appendChild(messageDiv);
+                chatMessages.scrollTop = chatMessages.scrollHeight;
+            }
+
+            // Function to handle sending a message to the Gemini API
+            async function sendMessage() {
+                if (!isApiKeyEntered) {
+                    apiKey = apiKeyInput.value.trim();
+                    if (apiKey) {
+                        isApiKeyEntered = true;
+                        apiKeyInput.style.display = 'none';
+                        userInput.disabled = false;
+                        addMessage('bot', 'تم حفظ المفتاح بنجاح! يمكنك الآن بدء الدردشة.');
+                    } else {
+                        addMessage('bot', 'من فضلك أدخل مفتاح الـ API الخاص بك أولاً.');
+                        return;
+                    }
+                }
+                
+                const userMessage = userInput.value.trim();
+                if (userMessage === '') {
+                    return;
+                }
+
+                addMessage('user', userMessage);
+                userInput.value = '';
+                loadingIndicator.style.display = 'flex';
+                sendBtn.disabled = true;
+                userInput.disabled = true;
+
+                // Define the system instructions for the financial analyst persona
+                const systemPrompt = `
+                    You are a professional financial analyst specialized in currency, crypto, and commodity markets. 
+                    Your role is to provide a comprehensive analysis and a clear recommendation.
+                    The user will give you the name of a currency, crypto, or commodity. 
+                    You must perform fundamental, technical, and news analysis to provide a clear buy or sell recommendation.
+                    Your response MUST be in the following structured format, with each part clearly labeled:
+                    - **التحليل الأساسي:** (Fundamental Analysis)
+                    - **التحليل الفني:** (Technical Analysis)
+                    - **التحليل الفلكي (Astrological) و الأخبار:** (Astrological Analysis & News)
+                    - **التوصية:** (Recommendation)
+                    - **سعر الدخول:** (Entry Price)
+                    - **سعر إيقاف الخسارة:** (Stop Loss Price)
+                    - **سعر الهدف الأول:** (Take Profit 1 Price)
+                    - **سعر الهدف الثاني:** (Take Profit 2 Price)
+                    
+                    If you cannot find all the required information, you must state that some information is not available but still provide the best possible analysis and recommendation based on the data you can find.
+                `;
+
+                // Construct the payload with the system prompt and tools
+                const payload = {
+                    contents: [{ role: 'user', parts: [{ text: userMessage }] }],
+                    tools: [{ "google_search": {} }],
+                    systemInstruction: {
+                        parts: [{ text: systemPrompt }]
+                    },
+                };
+
+                try {
+                    const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-05-20:generateContent?key=${apiKey}`;
+                    
+                    const response = await fetch(apiUrl, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify(payload)
+                    });
+
+                    const result = await response.json();
+                    const botMessage = result?.candidates?.[0]?.content?.parts?.[0]?.text;
+
+                    if (botMessage) {
+                        addMessage('bot', botMessage);
+                    } else {
+                        addMessage('bot', 'عذرًا، حدث خطأ ما. يرجى المحاولة مرة أخرى.');
+                    }
+                } catch (error) {
+                    console.error('API Error:', error);
+                    addMessage('bot', 'عذرًا، حدث خطأ في الاتصال. يرجى التحقق من مفتاح الـ API.');
+                } finally {
+                    loadingIndicator.style.display = 'none';
+                    sendBtn.disabled = false;
+                    userInput.disabled = false;
+                    userInput.focus();
+                }
+            }
+
+            // Event listener for the send button
+            sendBtn.addEventListener('click', sendMessage);
+
+            // Allow sending with Enter key
+            userInput.addEventListener('keypress', (e) => {
+                if (e.key === 'Enter' && !e.shiftKey) {
+                    e.preventDefault();
+                    sendMessage();
+                }
+            });
+        });
+    </script>
+</body>
+</html>
